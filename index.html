@@ -2,7 +2,8 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: gap: https://ssl.gstatic.com 'unsafe-eval'; style-src 'self' 'unsafe-inline'; media-src *">
   <title>Manga Reader</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -11,7 +12,7 @@
   <div id="app">
 
     <header id="top-bar">
-      <button id="btn-back" class="hidden">← Volver</button>
+      <button id="btn-back" class="hidden">&#8592; Volver</button>
       <span id="top-title">Mi biblioteca</span>
       <span id="page-counter"></span>
     </header>
@@ -22,12 +23,12 @@
 
     <div id="chapters-view" class="view hidden">
       <div id="continue-box" class="hidden"></div>
-      <div id="chapter-list">Cargando capítulos...</div>
+      <div id="chapter-list">Cargando cap&#237;tulos...</div>
     </div>
 
     <div id="viewer-view" class="view hidden">
       <main id="viewer">
-        <img id="page-image" src="" alt="Página del manga">
+        <img id="page-image" src="" alt="P&#225;gina del manga">
         <div id="viewer-message"></div>
         <button id="btn-prev" class="nav-zone left"></button>
         <button id="btn-next" class="nav-zone right"></button>
@@ -36,7 +37,7 @@
 
   </div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/2.6.1/jszip.min.js"></script>
+  <script src="jszip.min.js"></script>
   <script src="script.js"></script>
 </body>
 </html>
