@@ -1,7 +1,7 @@
 // ---------- Configuración ----------
 var CONFIG = {
   rootPath: 'manga',
-  manifestFile: 'manga/library.json'
+  manifestFile: 'library.json'
 };
 
 // ---------- Estado ----------
@@ -10,37 +10,42 @@ var currentPage = 0;
 var currentSeries = null;
 var currentSeriesTitle = null;
 var currentChapterName = null;
-var currentSeriesChapters = []; // lista de nombres de archivo .cbz de la serie abierta
+var currentSeriesChapters = [];
+var pageBlobs = [];
+
+// ---------- Detección de características ----------
+var hasBlob = (function() {
+  try { return !!window.Blob; } catch(e) { return false; }
+})();
+
+var hasCreateObjectURL = (function() {
+  try {
+    return !!(window.URL && window.URL.createObjectURL) || !!(window.webkitURL && window.webkitURL.createObjectURL);
+  } catch(e) { return false; }
+})();
+
+var useDataURLs = !hasCreateObjectURL;
 
 // ---------- Elementos ----------
 var topTitleEl = document.getElementById('top-title');
 var counterEl = document.getElementById('page-counter');
 var btnBack = document.getElementById('btn-back');
-
 var libraryView = document.getElementById('library-view');
 var chaptersView = document.getElementById('chapters-view');
 var viewerView = document.getElementById('viewer-view');
-
 var libraryGridEl = document.getElementById('library-grid');
 var continueBoxEl = document.getElementById('continue-box');
 var chapterListEl = document.getElementById('chapter-list');
-
 var imgEl = document.getElementById('page-image');
 var viewerMessageEl = document.getElementById('viewer-message');
 
-// ---------- Progreso guardado (localStorage) ----------
+// ---------- Progreso guardado ----------
 function getProgressStore() {
-  try {
-    return JSON.parse(localStorage.getItem('manga_progress') || '{}');
-  } catch (e) {
-    return {};
-  }
+  try { return JSON.parse(localStorage.getItem('manga_progress') || '{}'); } catch (e) { return {}; }
 }
 
 function saveProgressStore(obj) {
-  try {
-    localStorage.setItem('manga_progress', JSON.stringify(obj));
-  } catch (e) { /* almacenamiento no disponible, ignorar */ }
+  try { localStorage.setItem('manga_progress', JSON.stringify(obj)); } catch (e) { }
 }
 
 function saveProgress(series, chapterName, page, total) {
@@ -57,7 +62,7 @@ function getSeriesProgress(series) {
   return store[series] || null;
 }
 
-// ---------- Orden natural (Capítulo 2 antes que Capítulo 10) ----------
+// ---------- Orden natural ----------
 function naturalCompare(a, b) {
   var ax = [], bx = [];
   a.replace(/(\d+)|(\D+)/g, function (_, d, s) { ax.push([d || Infinity, s || '']); });
@@ -73,33 +78,35 @@ function naturalCompare(a, b) {
 
 // ---------- Navegación entre vistas ----------
 function showView(name) {
-  libraryView.classList.add('hidden');
-  chaptersView.classList.add('hidden');
-  viewerView.classList.add('hidden');
+  libraryView.className = 'view hidden';
+  chaptersView.className = 'view hidden';
+  viewerView.className = 'view hidden';
   counterEl.textContent = '';
-  btnBack.classList.toggle('hidden', name === 'library');
-
+  
   if (name === 'library') {
-    libraryView.classList.remove('hidden');
+    btnBack.className = 'hidden';
+    libraryView.className = 'view';
     topTitleEl.textContent = 'Mi biblioteca';
   } else if (name === 'chapters') {
-    chaptersView.classList.remove('hidden');
+    btnBack.className = '';
+    chaptersView.className = 'view';
     topTitleEl.textContent = currentSeriesTitle || currentSeries;
   } else if (name === 'viewer') {
-    viewerView.classList.remove('hidden');
+    btnBack.className = '';
+    viewerView.className = 'view';
     topTitleEl.textContent = currentChapterName || '';
   }
 }
 
 btnBack.addEventListener('click', function () {
-  if (!viewerView.classList.contains('hidden')) {
+  if (viewerView.className.indexOf('hidden') === -1) {
     showView('chapters');
   } else {
     showView('library');
   }
 });
 
-// ---------- Utilidad: pedir un archivo del MISMO sitio (sin cruzar dominios) ----------
+// ---------- Utilidad: pedir archivo ----------
 function sameOriginGet(path, responseType, callback) {
   var xhr = new XMLHttpRequest();
   var done = false;
@@ -109,7 +116,7 @@ function sameOriginGet(path, responseType, callback) {
     done = true;
     try { xhr.abort(); } catch (e2) {}
     callback(null, 'timeout');
-  }, 15000);
+  }, 30000);
 
   function finish(result, err) {
     if (done) return;
@@ -135,33 +142,25 @@ function sameOriginGet(path, responseType, callback) {
     finish(responseType === 'arraybuffer' ? xhr.response : xhr.responseText, null);
   };
 
-  xhr.onerror = function () {
-    finish(null, 'error-de-red');
-  };
+  xhr.onerror = function () { finish(null, 'error-de-red'); };
 
-  try {
-    xhr.send();
-  } catch (e1) {
-    finish(null, 'send-failed');
-  }
+  try { xhr.send(); } catch (e1) { finish(null, 'send-failed'); }
 }
 
-// ---------- Cargar biblioteca desde manga/library.json ----------
+// ---------- Cargar biblioteca ----------
 function loadLibrary() {
   showView('library');
   libraryGridEl.innerHTML = 'Cargando biblioteca...';
 
   sameOriginGet(CONFIG.manifestFile, 'text', function (text, err) {
     if (err) {
-      libraryGridEl.innerHTML = 'No se pudo leer "' + CONFIG.manifestFile + '" (error ' + err + '). Revisa que el archivo exista y tenga el formato correcto.';
+      libraryGridEl.innerHTML = 'No se pudo leer "' + CONFIG.manifestFile + '" (error ' + err + ').';
       return;
     }
 
     var series;
-    try {
-      series = JSON.parse(text);
-    } catch (e) {
-      libraryGridEl.innerHTML = 'El archivo library.json tiene un error de formato (JSON inválido).';
+    try { series = JSON.parse(text); } catch (e) {
+      libraryGridEl.innerHTML = 'El archivo library.json tiene un error de formato.';
       return;
     }
 
@@ -171,53 +170,51 @@ function loadLibrary() {
     }
 
     libraryGridEl.innerHTML = '';
-    series.forEach(function (s) {
-      var progress = getSeriesProgress(s.name);
+    for (var i = 0; i < series.length; i++) {
+      (function(s) {
+        var progress = getSeriesProgress(s.name);
+        var card = document.createElement('div');
+        card.className = 'series-card';
 
-      var card = document.createElement('div');
-      card.className = 'series-card';
+        var coverBox = document.createElement('div');
+        coverBox.className = 'series-cover';
+        var img = document.createElement('img');
+        img.src = CONFIG.rootPath + '/' + s.name + '/cover.jpg';
+        img.onerror = function () {
+          coverBox.innerHTML = '<span class="cover-fallback">' + (s.title || s.name).charAt(0).toUpperCase() + '</span>';
+        };
+        coverBox.appendChild(img);
 
-      var coverBox = document.createElement('div');
-      coverBox.className = 'series-cover';
-      var img = document.createElement('img');
-      img.src = CONFIG.rootPath + '/' + s.name + '/cover.jpg';
-      img.onerror = function () {
-        coverBox.innerHTML = '<span class="cover-fallback">' + (s.title || s.name).charAt(0).toUpperCase() + '</span>';
-      };
-      coverBox.appendChild(img);
+        var titleEl = document.createElement('div');
+        titleEl.className = 'series-title';
+        titleEl.textContent = s.title || s.name;
 
-      var titleEl = document.createElement('div');
-      titleEl.className = 'series-title';
-      titleEl.textContent = s.title || s.name;
+        var progEl = document.createElement('div');
+        progEl.className = 'series-progress';
+        progEl.textContent = progress ? ('Vas en: ' + progress.lastChapter) : 'Nuevo';
 
-      var progEl = document.createElement('div');
-      progEl.className = 'series-progress';
-      progEl.textContent = progress ? ('Vas en: ' + progress.lastChapter) : 'Nuevo';
+        card.appendChild(coverBox);
+        card.appendChild(titleEl);
+        card.appendChild(progEl);
 
-      card.appendChild(coverBox);
-      card.appendChild(titleEl);
-      card.appendChild(progEl);
-
-      card.addEventListener('click', function () {
-        openSeries(s);
-      });
-
-      libraryGridEl.appendChild(card);
-    });
+        card.addEventListener('click', function () { openSeries(s); });
+        libraryGridEl.appendChild(card);
+      })(series[i]);
+    }
   });
 }
 
-// ---------- Abrir una serie: mostrar lista de capítulos ----------
+// ---------- Abrir serie ----------
 function openSeries(seriesObj) {
   currentSeries = seriesObj.name;
   currentSeriesTitle = seriesObj.title || seriesObj.name;
   currentSeriesChapters = (seriesObj.chapters || []).slice().sort(naturalCompare);
 
   showView('chapters');
-  continueBoxEl.classList.add('hidden');
+  continueBoxEl.className = 'hidden';
 
   if (currentSeriesChapters.length === 0) {
-    chapterListEl.innerHTML = 'No hay capítulos listados para esta serie en library.json.';
+    chapterListEl.innerHTML = 'No hay capítulos listados para esta serie.';
     return;
   }
 
@@ -228,55 +225,72 @@ function openSeries(seriesObj) {
     continueBoxEl.innerHTML =
       '<div class="continue-label">Continuar leyendo</div>' +
       '<div class="continue-title">' + progress.lastChapter + ' — página ' + (last.page + 1) + ' de ' + last.total + '</div>';
-    continueBoxEl.classList.remove('hidden');
+    continueBoxEl.className = '';
     continueBoxEl.onclick = function () {
-      var match = currentSeriesChapters.filter(function (f) { return f.replace(/\.cbz$/i, '') === progress.lastChapter; })[0];
+      var match = null;
+      for (var i = 0; i < currentSeriesChapters.length; i++) {
+        if (currentSeriesChapters[i].replace(/\.cbz$/i, '') === progress.lastChapter) {
+          match = currentSeriesChapters[i];
+          break;
+        }
+      }
       if (match) loadChapter(match, last.page);
     };
   }
 
   chapterListEl.innerHTML = '';
-  currentSeriesChapters.forEach(function (filename) {
-    var chapterName = filename.replace(/\.cbz$/i, '');
-    var btn = document.createElement('button');
-    btn.className = 'chapter-item';
+  for (var j = 0; j < currentSeriesChapters.length; j++) {
+    (function(filename) {
+      var chapterName = filename.replace(/\.cbz$/i, '');
+      var btn = document.createElement('button');
+      btn.className = 'chapter-item';
 
-    var label = document.createElement('span');
-    label.textContent = chapterName;
-    btn.appendChild(label);
+      var label = document.createElement('span');
+      label.textContent = chapterName;
+      btn.appendChild(label);
 
-    if (progress && progress.chapters && progress.chapters[chapterName]) {
-      var cp = progress.chapters[chapterName];
-      var tag = document.createElement('span');
-      tag.className = 'chapter-progress-tag';
-      tag.textContent = (cp.page + 1 >= cp.total) ? 'Terminado' : ('Página ' + (cp.page + 1) + ' de ' + cp.total);
-      btn.appendChild(tag);
-    }
+      if (progress && progress.chapters && progress.chapters[chapterName]) {
+        var cp = progress.chapters[chapterName];
+        var tag = document.createElement('span');
+        tag.className = 'chapter-progress-tag';
+        tag.textContent = (cp.page + 1 >= cp.total) ? 'Terminado' : ('Página ' + (cp.page + 1) + ' de ' + cp.total);
+        btn.appendChild(tag);
+      }
 
-    btn.addEventListener('click', function () {
-      loadChapter(filename, 0);
-    });
-    chapterListEl.appendChild(btn);
-  });
+      btn.addEventListener('click', function () { loadChapter(filename, 0); });
+      chapterListEl.appendChild(btn);
+    })(currentSeriesChapters[j]);
+  }
 }
 
-// ---------- Descargar y desempaquetar un capítulo .cbz (mismo sitio) ----------
+// ---------- Liberar memoria ----------
+function cleanupPages() {
+  if (!useDataURLs && window.webkitURL) {
+    for (var i = 0; i < pageBlobs.length; i++) {
+      try { window.webkitURL.revokeObjectURL(pageBlobs[i]); } catch(e) {}
+    }
+  }
+  pageBlobs = [];
+  pages = [];
+}
+
+// ---------- Cargar capítulo ----------
 function loadChapter(filename, startPage) {
   var chapterName = filename.replace(/\.cbz$/i, '');
   var path = CONFIG.rootPath + '/' + currentSeries + '/' + filename;
 
-  pages = [];
+  cleanupPages();
   currentPage = 0;
   currentChapterName = chapterName;
   showView('viewer');
-  viewerMessageEl.textContent = 'Descargando capítulo, espera un momento...';
   viewerMessageEl.style.display = 'block';
+  viewerMessageEl.textContent = 'Descargando capítulo, espera un momento...';
   imgEl.src = '';
   counterEl.textContent = '';
 
   sameOriginGet(path, 'arraybuffer', function (data, err) {
     if (err) {
-      viewerMessageEl.textContent = 'Error descargando el capítulo (código ' + err + '). Revisa que el nombre en library.json sea EXACTO al del archivo subido.';
+      viewerMessageEl.textContent = 'Error descargando el capítulo (código ' + err + ').';
       return;
     }
 
@@ -295,24 +309,77 @@ function loadChapter(filename, startPage) {
         return;
       }
 
-      pages = imageNames.map(function (name) {
-        var fileData = zip.files[name].asArrayBuffer();
-        var ext = name.split('.').pop().toLowerCase();
-        var mime = (ext === 'png') ? 'image/png' : (ext === 'webp') ? 'image/webp' : (ext === 'gif') ? 'image/gif' : 'image/jpeg';
-        var blob = new Blob([fileData], { type: mime });
-        return URL.createObjectURL(blob);
-      });
-
-      viewerMessageEl.style.display = 'none';
-      showPage(startPage || 0);
-
+      if (useDataURLs) {
+        var processBatch = function(startIdx) {
+          var endIdx = Math.min(startIdx + 3, imageNames.length);
+          for (var i = startIdx; i < endIdx; i++) {
+            (function(idx) {
+              try {
+                var fileData = zip.files[imageNames[idx]].asArrayBuffer();
+                var ext = imageNames[idx].split('.').pop().toLowerCase();
+                var mime = 'image/jpeg';
+                if (ext === 'png') mime = 'image/png';
+                else if (ext === 'webp') mime = 'image/webp';
+                else if (ext === 'gif') mime = 'image/gif';
+                
+                var bytes = new Uint8Array(fileData);
+                var binary = '';
+                for (var j = 0; j < bytes.length; j++) {
+                  binary += String.fromCharCode(bytes[j]);
+                }
+                pages[idx] = 'data:' + mime + ';base64,' + window.btoa(binary);
+              } catch(e) {
+                pages[idx] = '';
+              }
+            })(i);
+          }
+          
+          if (endIdx < imageNames.length) {
+            viewerMessageEl.textContent = 'Procesando imágenes... ' + endIdx + '/' + imageNames.length;
+            setTimeout(function() { processBatch(endIdx); }, 10);
+          } else {
+            viewerMessageEl.style.display = 'none';
+            showPage(startPage || 0);
+          }
+        };
+        processBatch(0);
+      } else {
+        for (var k = 0; k < imageNames.length; k++) {
+          try {
+            var fileData = zip.files[imageNames[k]].asArrayBuffer();
+            var ext = imageNames[k].split('.').pop().toLowerCase();
+            var mime = 'image/jpeg';
+            if (ext === 'png') mime = 'image/png';
+            else if (ext === 'webp') mime = 'image/webp';
+            else if (ext === 'gif') mime = 'image/gif';
+            
+            var blob = new Blob([fileData], { type: mime });
+            var url = window.URL ? window.URL.createObjectURL(blob) : window.webkitURL.createObjectURL(blob);
+            pages.push(url);
+            pageBlobs.push(url);
+          } catch(e) {
+            try {
+              var bytes = new Uint8Array(fileData);
+              var binary = '';
+              for (var m = 0; m < bytes.length; m++) {
+                binary += String.fromCharCode(bytes[m]);
+              }
+              pages.push('data:' + mime + ';base64,' + window.btoa(binary));
+            } catch(e2) {
+              pages.push('');
+            }
+          }
+        }
+        viewerMessageEl.style.display = 'none';
+        showPage(startPage || 0);
+      }
     } catch (e) {
       viewerMessageEl.textContent = 'No se pudo abrir el archivo .cbz: ' + e.message;
     }
   });
 }
 
-// ---------- Mostrar página (y guardar progreso) ----------
+// ---------- Mostrar página ----------
 function showPage(index) {
   if (pages.length === 0) return;
   if (index < 0) index = 0;
@@ -321,11 +388,10 @@ function showPage(index) {
   currentPage = index;
   imgEl.src = pages[currentPage];
   counterEl.textContent = (currentPage + 1) + ' / ' + pages.length;
-
   saveProgress(currentSeries, currentChapterName, currentPage, pages.length);
 }
 
-// ---------- Navegación de páginas ----------
+// ---------- Navegación ----------
 document.getElementById('btn-prev').addEventListener('click', function () {
   showPage(currentPage - 1);
 });
@@ -336,3 +402,4 @@ document.getElementById('btn-next').addEventListener('click', function () {
 
 // ---------- Arranque ----------
 loadLibrary();
+    
