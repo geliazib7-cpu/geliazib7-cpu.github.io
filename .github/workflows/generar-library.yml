@@ -1,0 +1,54 @@
+name: Generar library.json
+
+on:
+  push:
+    paths:
+      - 'manga/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el repositorio
+        uses: actions/checkout@v4
+
+      - name: Generar manga/library.json
+        run: |
+          python3 - <<'EOF'
+          import json, os
+
+          root = 'manga'
+          series = []
+
+          for name in sorted(os.listdir(root)):
+              path = os.path.join(root, name)
+              if not os.path.isdir(path):
+                  continue
+              chapters = sorted([
+                  f[:-4] for f in os.listdir(path)
+                  if f.lower().endswith('.cbz')
+              ])
+              title = name.replace('-', ' ').replace('_', ' ').title()
+              series.append({
+                  "name": name,
+                  "title": title,
+                  "chapters": chapters
+              })
+
+          with open(os.path.join(root, 'library.json'), 'w', encoding='utf-8') as f:
+              json.dump(series, f, ensure_ascii=False, indent=2)
+
+          print(json.dumps(series, ensure_ascii=False, indent=2))
+          EOF
+
+      - name: Guardar cambios en el repositorio
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add manga/library.json
+          git diff --staged --quiet || git commit -m "Actualizar library.json automáticamente"
+          git push
