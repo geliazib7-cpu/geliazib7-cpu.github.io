@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Manga Reader</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div id="app">
+
+    <header id="top-bar">
+      <button id="btn-back" class="hidden">← Volver</button>
+      <span id="top-title">Mi biblioteca</span>
+      <button id="btn-add-series" class="hidden">+ Manga</button>
+      <button id="btn-add-chapters" class="hidden">+ Capítulos</button>
+      <span id="page-counter"></span>
+    </header>
+
+    <!-- Vista 1: biblioteca -->
+    <div id="library-view" class="view">
+      <div id="unsupported-msg" class="hidden"></div>
+      <div id="library-grid"></div>
+    </div>
+
+    <!-- Vista 2: capítulos de una serie -->
+    <div id="chapters-view" class="view hidden">
+      <div id="continue-box" class="hidden"></div>
+      <div id="chapter-list"></div>
+    </div>
+
+    <!-- Vista 3: visor -->
+    <div id="viewer-view" class="view hidden">
+      <main id="viewer">
+        <img id="page-image" src="" alt="Página del manga">
+        <div id="viewer-message"></div>
+        <button id="btn-prev" class="nav-zone left"></button>
+        <button id="btn-next" class="nav-zone right"></button>
+      </main>
+    </div>
+
+    <!-- Formulario para agregar un manga nuevo -->
+    <div id="add-series-form" class="modal hidden">
+      <div class="modal-box">
+        <h3>Agregar manga nuevo</h3>
+        <label>Nombre del manga</label>
+        <input type="text" id="input-series-title" placeholder="Ej. Demon Slayer">
+        <label>Portada (opcional)</label>
+        <input type="file" id="input-cover" accept="image/*">
+        <label>Capítulos (.cbz, puedes elegir varios)</label>
+        <input type="file" id="input-chapters" accept=".cbz" multiple>
+        <div id="add-series-status"></div>
+        <div class="modal-actions">
+          <button id="btn-cancel-series">Cancelar</button>
+          <button id="btn-save-series">Guardar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Formulario para agregar más capítulos a una serie existente -->
+    <div id="add-chapters-form" class="modal hidden">
+      <div class="modal-box">
+        <h3>Agregar capítulos</h3>
+        <label>Capítulos (.cbz, puedes elegir varios)</label>
+        <input type="file" id="input-more-chapters" accept=".cbz" multiple>
+        <div id="add-chapters-status"></div>
+        <div class="modal-actions">
+          <button id="btn-cancel-chapters">Cancelar</button>
+          <button id="btn-save-chapters">Guardar</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/2.6.1/jszip.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
