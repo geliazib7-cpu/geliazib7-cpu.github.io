@@ -104,20 +104,51 @@ btnBack.addEventListener('click', function () {
 function githubApiGet(path, callback) {
   var url = 'https://api.github.com/repos/' + CONFIG.owner + '/' + CONFIG.repo + '/contents/' + path;
   var xhr = new XMLHttpRequest();
-  xhr.open('GET', url, true);
+  var done = false;
+
+  var timeoutId = setTimeout(function () {
+    if (done) return;
+    done = true;
+    try { xhr.abort(); } catch (e2) {}
+    callback(null, 'timeout');
+  }, 10000);
+
+  function finish(result, err) {
+    if (done) return;
+    done = true;
+    clearTimeout(timeoutId);
+    callback(result, err);
+  }
+
+  try {
+    xhr.open('GET', url, true);
+  } catch (e0) {
+    finish(null, 'open-failed: ' + e0.message);
+    return;
+  }
+
   xhr.onreadystatechange = function () {
     if (xhr.readyState !== 4) return;
     if (xhr.status !== 200) {
-      callback(null, xhr.status);
+      finish(null, xhr.status || 'sin-respuesta');
       return;
     }
     try {
-      callback(JSON.parse(xhr.responseText), null);
+      finish(JSON.parse(xhr.responseText), null);
     } catch (e) {
-      callback(null, 'parse');
+      finish(null, 'parse');
     }
   };
-  xhr.send();
+
+  xhr.onerror = function () {
+    finish(null, 'error-de-red');
+  };
+
+  try {
+    xhr.send();
+  } catch (e1) {
+    finish(null, 'send-failed: ' + e1.message);
+  }
 }
 
 function rawUrl(path) {
