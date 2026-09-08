@@ -10,25 +10,21 @@
 
   <div id="app">
 
-    <!-- Encabezado -->
     <header id="top-bar">
       <button id="btn-back" class="hidden">← Volver</button>
       <span id="top-title">Mi biblioteca</span>
       <span id="page-counter"></span>
     </header>
 
-    <!-- Vista 1: biblioteca de mangas (portadas) -->
     <div id="library-view" class="view">
       <div id="library-grid">Cargando biblioteca...</div>
     </div>
 
-    <!-- Vista 2: lista de capítulos de un manga -->
     <div id="chapters-view" class="view hidden">
       <div id="continue-box" class="hidden"></div>
       <div id="chapter-list">Cargando capítulos...</div>
     </div>
 
-    <!-- Vista 3: visor de páginas -->
     <div id="viewer-view" class="view hidden">
       <main id="viewer">
         <img id="page-image" src="" alt="Página del manga">
@@ -40,7 +36,6 @@
 
   </div>
 
-  <!-- JSZip 2.6.1: versión compatible con navegadores muy antiguos (sin depender de Promises) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/2.6.1/jszip.min.js"></script>
   <script src="script.js"></script>
 </body>
