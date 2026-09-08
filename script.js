@@ -1,9 +1,7 @@
-// ---------- Configuración del repositorio ----------
+// ---------- Configuración ----------
 var CONFIG = {
-  owner: 'geliazib7-cpu',
-  repo: 'geliazib7-cpu.github.io',
-  branch: 'main',
-  rootPath: 'manga' // carpeta raíz: manga/<serie>/cover.jpg + manga/<serie>/*.cbz
+  rootPath: 'manga',
+  manifestFile: 'manga/library.json'
 };
 
 // ---------- Estado ----------
@@ -12,6 +10,7 @@ var currentPage = 0;
 var currentSeries = null;
 var currentSeriesTitle = null;
 var currentChapterName = null;
+var currentSeriesChapters = []; // lista de nombres de archivo .cbz de la serie abierta
 
 // ---------- Elementos ----------
 var topTitleEl = document.getElementById('top-title');
@@ -100,9 +99,8 @@ btnBack.addEventListener('click', function () {
   }
 });
 
-// ---------- Utilidad para pedir JSON a la API de GitHub ----------
-function githubApiGet(path, callback) {
-  var url = 'https://api.github.com/repos/' + CONFIG.owner + '/' + CONFIG.repo + '/contents/' + path;
+// ---------- Utilidad: pedir un archivo del MISMO sitio (sin cruzar dominios) ----------
+function sameOriginGet(path, responseType, callback) {
   var xhr = new XMLHttpRequest();
   var done = false;
 
@@ -111,7 +109,7 @@ function githubApiGet(path, callback) {
     done = true;
     try { xhr.abort(); } catch (e2) {}
     callback(null, 'timeout');
-  }, 10000);
+  }, 15000);
 
   function finish(result, err) {
     if (done) return;
@@ -121,23 +119,20 @@ function githubApiGet(path, callback) {
   }
 
   try {
-    xhr.open('GET', url, true);
+    xhr.open('GET', path + '?t=' + Date.now(), true);
+    if (responseType) xhr.responseType = responseType;
   } catch (e0) {
-    finish(null, 'open-failed: ' + e0.message);
+    finish(null, 'open-failed');
     return;
   }
 
   xhr.onreadystatechange = function () {
     if (xhr.readyState !== 4) return;
-    if (xhr.status !== 200) {
-      finish(null, xhr.status || 'sin-respuesta');
+    if (xhr.status !== 200 && xhr.status !== 0) {
+      finish(null, xhr.status);
       return;
     }
-    try {
-      finish(JSON.parse(xhr.responseText), null);
-    } catch (e) {
-      finish(null, 'parse');
-    }
+    finish(responseType === 'arraybuffer' ? xhr.response : xhr.responseText, null);
   };
 
   xhr.onerror = function () {
@@ -147,30 +142,31 @@ function githubApiGet(path, callback) {
   try {
     xhr.send();
   } catch (e1) {
-    finish(null, 'send-failed: ' + e1.message);
+    finish(null, 'send-failed');
   }
 }
 
-function rawUrl(path) {
-  return 'https://raw.githubusercontent.com/' + CONFIG.owner + '/' + CONFIG.repo + '/' + CONFIG.branch + '/' + path;
-}
-
-// ---------- Cargar biblioteca (lista de series) ----------
+// ---------- Cargar biblioteca desde manga/library.json ----------
 function loadLibrary() {
   showView('library');
   libraryGridEl.innerHTML = 'Cargando biblioteca...';
 
-  githubApiGet(CONFIG.rootPath, function (items, err) {
+  sameOriginGet(CONFIG.manifestFile, 'text', function (text, err) {
     if (err) {
-      libraryGridEl.innerHTML = 'No se pudo cargar la biblioteca (error ' + err + '). Revisa que exista la carpeta "' + CONFIG.rootPath + '" en el repositorio.';
+      libraryGridEl.innerHTML = 'No se pudo leer "' + CONFIG.manifestFile + '" (error ' + err + '). Revisa que el archivo exista y tenga el formato correcto.';
       return;
     }
 
-    var series = items.filter(function (it) { return it.type === 'dir'; });
-    series.sort(function (a, b) { return naturalCompare(a.name, b.name); });
+    var series;
+    try {
+      series = JSON.parse(text);
+    } catch (e) {
+      libraryGridEl.innerHTML = 'El archivo library.json tiene un error de formato (JSON inválido).';
+      return;
+    }
 
-    if (series.length === 0) {
-      libraryGridEl.innerHTML = 'Todavía no hay ninguna carpeta de manga dentro de "' + CONFIG.rootPath + '".';
+    if (!series || series.length === 0) {
+      libraryGridEl.innerHTML = 'Todavía no hay ningún manga en library.json.';
       return;
     }
 
@@ -184,15 +180,15 @@ function loadLibrary() {
       var coverBox = document.createElement('div');
       coverBox.className = 'series-cover';
       var img = document.createElement('img');
-      img.src = rawUrl(CONFIG.rootPath + '/' + s.name + '/cover.jpg');
+      img.src = CONFIG.rootPath + '/' + s.name + '/cover.jpg';
       img.onerror = function () {
-        coverBox.innerHTML = '<span class="cover-fallback">' + s.name.charAt(0).toUpperCase() + '</span>';
+        coverBox.innerHTML = '<span class="cover-fallback">' + (s.title || s.name).charAt(0).toUpperCase() + '</span>';
       };
       coverBox.appendChild(img);
 
       var titleEl = document.createElement('div');
       titleEl.className = 'series-title';
-      titleEl.textContent = s.name.replace(/[-_]/g, ' ');
+      titleEl.textContent = s.title || s.name;
 
       var progEl = document.createElement('div');
       progEl.className = 'series-progress';
@@ -203,7 +199,7 @@ function loadLibrary() {
       card.appendChild(progEl);
 
       card.addEventListener('click', function () {
-        openSeries(s.name, titleEl.textContent);
+        openSeries(s);
       });
 
       libraryGridEl.appendChild(card);
@@ -212,69 +208,63 @@ function loadLibrary() {
 }
 
 // ---------- Abrir una serie: mostrar lista de capítulos ----------
-function openSeries(seriesName, seriesTitle) {
-  currentSeries = seriesName;
-  currentSeriesTitle = seriesTitle;
+function openSeries(seriesObj) {
+  currentSeries = seriesObj.name;
+  currentSeriesTitle = seriesObj.title || seriesObj.name;
+  currentSeriesChapters = (seriesObj.chapters || []).slice().sort(naturalCompare);
+
   showView('chapters');
-  chapterListEl.innerHTML = 'Cargando capítulos...';
   continueBoxEl.classList.add('hidden');
 
-  githubApiGet(CONFIG.rootPath + '/' + seriesName, function (items, err) {
-    if (err) {
-      chapterListEl.innerHTML = 'No se pudo cargar la lista (error ' + err + ').';
-      return;
+  if (currentSeriesChapters.length === 0) {
+    chapterListEl.innerHTML = 'No hay capítulos listados para esta serie en library.json.';
+    return;
+  }
+
+  var progress = getSeriesProgress(currentSeries);
+
+  if (progress && progress.lastChapter && progress.chapters && progress.chapters[progress.lastChapter]) {
+    var last = progress.chapters[progress.lastChapter];
+    continueBoxEl.innerHTML =
+      '<div class="continue-label">Continuar leyendo</div>' +
+      '<div class="continue-title">' + progress.lastChapter + ' — página ' + (last.page + 1) + ' de ' + last.total + '</div>';
+    continueBoxEl.classList.remove('hidden');
+    continueBoxEl.onclick = function () {
+      var match = currentSeriesChapters.filter(function (f) { return f.replace(/\.cbz$/i, '') === progress.lastChapter; })[0];
+      if (match) loadChapter(match, last.page);
+    };
+  }
+
+  chapterListEl.innerHTML = '';
+  currentSeriesChapters.forEach(function (filename) {
+    var chapterName = filename.replace(/\.cbz$/i, '');
+    var btn = document.createElement('button');
+    btn.className = 'chapter-item';
+
+    var label = document.createElement('span');
+    label.textContent = chapterName;
+    btn.appendChild(label);
+
+    if (progress && progress.chapters && progress.chapters[chapterName]) {
+      var cp = progress.chapters[chapterName];
+      var tag = document.createElement('span');
+      tag.className = 'chapter-progress-tag';
+      tag.textContent = (cp.page + 1 >= cp.total) ? 'Terminado' : ('Página ' + (cp.page + 1) + ' de ' + cp.total);
+      btn.appendChild(tag);
     }
 
-    var files = items.filter(function (f) { return f.type === 'file' && /\.cbz$/i.test(f.name); });
-    files.sort(function (a, b) { return naturalCompare(a.name, b.name); });
-
-    if (files.length === 0) {
-      chapterListEl.innerHTML = 'No hay archivos .cbz todavía en esta carpeta.';
-      return;
-    }
-
-    var progress = getSeriesProgress(seriesName);
-
-    if (progress && progress.lastChapter && progress.chapters && progress.chapters[progress.lastChapter]) {
-      var last = progress.chapters[progress.lastChapter];
-      continueBoxEl.innerHTML =
-        '<div class="continue-label">Continuar leyendo</div>' +
-        '<div class="continue-title">' + progress.lastChapter + ' — página ' + (last.page + 1) + ' de ' + last.total + '</div>';
-      continueBoxEl.classList.remove('hidden');
-      continueBoxEl.onclick = function () {
-        var match = files.filter(function (f) { return f.name.replace(/\.cbz$/i, '') === progress.lastChapter; })[0];
-        if (match) loadChapter(match.download_url, match.name.replace(/\.cbz$/i, ''), last.page);
-      };
-    }
-
-    chapterListEl.innerHTML = '';
-    files.forEach(function (f) {
-      var chapterName = f.name.replace(/\.cbz$/i, '');
-      var btn = document.createElement('button');
-      btn.className = 'chapter-item';
-
-      var label = document.createElement('span');
-      label.textContent = chapterName;
-      btn.appendChild(label);
-
-      if (progress && progress.chapters && progress.chapters[chapterName]) {
-        var cp = progress.chapters[chapterName];
-        var tag = document.createElement('span');
-        tag.className = 'chapter-progress-tag';
-        tag.textContent = (cp.page + 1 >= cp.total) ? 'Terminado' : ('Página ' + (cp.page + 1) + ' de ' + cp.total);
-        btn.appendChild(tag);
-      }
-
-      btn.addEventListener('click', function () {
-        loadChapter(f.download_url, chapterName, 0);
-      });
-      chapterListEl.appendChild(btn);
+    btn.addEventListener('click', function () {
+      loadChapter(filename, 0);
     });
+    chapterListEl.appendChild(btn);
   });
 }
 
-// ---------- Descargar y desempaquetar un capítulo .cbz ----------
-function loadChapter(fileUrl, chapterName, startPage) {
+// ---------- Descargar y desempaquetar un capítulo .cbz (mismo sitio) ----------
+function loadChapter(filename, startPage) {
+  var chapterName = filename.replace(/\.cbz$/i, '');
+  var path = CONFIG.rootPath + '/' + currentSeries + '/' + filename;
+
   pages = [];
   currentPage = 0;
   currentChapterName = chapterName;
@@ -284,24 +274,18 @@ function loadChapter(fileUrl, chapterName, startPage) {
   imgEl.src = '';
   counterEl.textContent = '';
 
-  var xhr = new XMLHttpRequest();
-  xhr.open('GET', fileUrl, true);
-  xhr.responseType = 'arraybuffer';
-
-  xhr.onreadystatechange = function () {
-    if (xhr.readyState !== 4) return;
-
-    if (xhr.status !== 200) {
-      viewerMessageEl.textContent = 'Error descargando el capítulo (código ' + xhr.status + ').';
+  sameOriginGet(path, 'arraybuffer', function (data, err) {
+    if (err) {
+      viewerMessageEl.textContent = 'Error descargando el capítulo (código ' + err + '). Revisa que el nombre en library.json sea EXACTO al del archivo subido.';
       return;
     }
 
     try {
-      var zip = new JSZip(xhr.response);
+      var zip = new JSZip(data);
       var imageNames = [];
-      for (var filename in zip.files) {
-        if (!zip.files[filename].dir && /\.(jpe?g|png|webp|gif)$/i.test(filename)) {
-          imageNames.push(filename);
+      for (var name in zip.files) {
+        if (!zip.files[name].dir && /\.(jpe?g|png|webp|gif)$/i.test(name)) {
+          imageNames.push(name);
         }
       }
       imageNames.sort(naturalCompare);
@@ -311,11 +295,11 @@ function loadChapter(fileUrl, chapterName, startPage) {
         return;
       }
 
-      pages = imageNames.map(function (filename) {
-        var data = zip.files[filename].asArrayBuffer();
-        var ext = filename.split('.').pop().toLowerCase();
+      pages = imageNames.map(function (name) {
+        var fileData = zip.files[name].asArrayBuffer();
+        var ext = name.split('.').pop().toLowerCase();
         var mime = (ext === 'png') ? 'image/png' : (ext === 'webp') ? 'image/webp' : (ext === 'gif') ? 'image/gif' : 'image/jpeg';
-        var blob = new Blob([data], { type: mime });
+        var blob = new Blob([fileData], { type: mime });
         return URL.createObjectURL(blob);
       });
 
@@ -325,9 +309,7 @@ function loadChapter(fileUrl, chapterName, startPage) {
     } catch (e) {
       viewerMessageEl.textContent = 'No se pudo abrir el archivo .cbz: ' + e.message;
     }
-  };
-
-  xhr.send();
+  });
 }
 
 // ---------- Mostrar página (y guardar progreso) ----------
