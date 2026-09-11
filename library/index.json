@@ -53,6 +53,12 @@
       "name": "// Cache del \"shell\" de la app para que abra rápido una vez instalada.\n// La carpeta library/ (biblioteca compartida vía GitHub) NUNCA se cachea:\n// tiene que verse siempre actualizada en todos los dispositivos.\nconst CACHE_NAME = 'manga-voice-shell-v2';\nconst SHELL_FILES = [\n    './',\n    './index.html',\n    './style.css',\n    './app.js',\n    './manifest.json',\n    './icon-192.png',\n    './icon-512.png',\n];\n\nself.addEventListener('install', (event) => {\n    event.waitUntil(\n        caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_FILES))\n    );\n    self.skipWaiting();\n});\n\nself.addEventListener('activate', (event) => {\n    event.waitUntil(\n        caches.keys().then((names) =>\n            Promise.all(names.filter((n) => n !== CACHE_NAME).map((n) => caches.delete(n)))\n        )\n    );\n    self.clients.claim();\n});\n\nself.addEventListener('fetch', (event) => {\n    const url = new URL(event.request.url);\n    if (url.origin !== self.location.origin) return;\n\n    // La biblioteca compartida (índice + páginas de manga) siempre a la red:\n    // cambia todo el tiempo y otros dispositivos dependen de ver lo último.\n    if (url.pathname.includes('/library/')) {\n        event.respondWith(\n            fetch(event.request).catch(() => caches.match(event.request))\n        );\n        return;\n    }\n\n    // El resto (la interfaz de la app) sí puede servirse desde cache primero.\n    event.respondWith(\n        caches.match(event.request).then((cached) => cached || fetch(event.request))\n    );\n});",
       "cover": "",
       "chapters": []
+    },
+    {
+      "id": "a",
+      "name": "a",
+      "cover": "",
+      "chapters": []
     }
   ]
 }
